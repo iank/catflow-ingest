@@ -42,6 +42,7 @@ jobs:
     - name: Install rabbitmq for tests
       run: |
         sudo apt update && sudo apt install -y rabbitmq-server
+        sudo systemctl stop rabbitmq-server
 
     - name: Cache pip dependencies
       uses: actions/cache@v3
