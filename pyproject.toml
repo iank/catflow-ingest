@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "catflow-ingest"
+dynamic = ["version"]
+description = "Data ingestion endpoint for an object recognition pipeline"
+authors = [{ name = "Ian Kilgore", email = "iank@iank.org"}]
+license = {file = "LICENSE"}
+requires-python = ">=3.7"
+dependencies = [
+  "fastapi",
+  "aio_pika",
+  "aioboto3",
+  "python-multipart",
+  "uvicorn",
+]
+
+[tool.setuptools]
+packages = ["catflow_ingest"]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "pytest-asyncio",
+  "moto[server]",
+  "httpx",
+  "aiofile",
+]
+
+[tool.setuptools_scm]
+write_to = "catflow_ingest/_version.py"
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "error",
+    'ignore:rabbitmq_logsdir:DeprecationWarning',
+]
