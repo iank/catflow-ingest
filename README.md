@@ -2,7 +2,7 @@
 
 Data ingestion endpoint for an object recognition pipeline
 
-Accepts video 
+Accepts video, uploads to S3, and sends a task to a queue.
 
 # Setup
 
