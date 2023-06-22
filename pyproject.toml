@@ -24,6 +24,7 @@ packages = ["catflow_ingest"]
 dev = [
   "pytest",
   "pytest-asyncio",
+  "pytest-rabbitmq",
   "moto[server]",
   "httpx",
   "aiofile",
