@@ -12,7 +12,7 @@ async def startup_event():
     app.state.producer = await Producer.create(
         os.environ["RABBITMQ_URL"],
         os.environ["RABBITMQ_EXCHANGE"],
-        [INGEST_KEY, INFER_KEY],
+        [INGEST_KEY, DETECT_KEY],
     )
 
 
@@ -27,7 +27,7 @@ app.add_event_handler("shutdown", shutdown_event)
 
 # Routing keys
 INGEST_KEY = "ingest"
-INFER_KEY = "infer"
+DETECT_KEY = "detect"
 
 
 async def check_rabbitmq_connection() -> bool:
@@ -63,7 +63,7 @@ async def ingest(file: UploadFile = File(...)):
     try:
         await upload_to_s3(file, s3_path)
         await app.state.producer.send_to_rabbitmq(INGEST_KEY, s3_path)
-        await app.state.producer.send_to_rabbitmq(INFER_KEY, s3_path)
+        await app.state.producer.send_to_rabbitmq(DETECT_KEY, s3_path)
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

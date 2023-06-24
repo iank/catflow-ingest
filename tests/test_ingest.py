@@ -74,7 +74,7 @@ async def test_send_to_rabbitmq(rabbitmq):
 
 @pytest.mark.asyncio
 async def test_ingest_endpoint(rabbitmq, s3_server):
-    """Test that a video uploaded to /ingest is sent to the infer and ingest queues"""
+    """Test that a video uploaded to /ingest is sent to the detect and ingest queues"""
     # Set up mock rabbitmq
     rmq_port = rabbitmq._impl.params.port
     os.environ["RABBITMQ_URL"] = f"amqp://guest:guest@localhost:{rmq_port}/"
@@ -82,11 +82,11 @@ async def test_ingest_endpoint(rabbitmq, s3_server):
     channel.exchange_declare(
         exchange=os.environ["RABBITMQ_EXCHANGE"], exchange_type="direct"
     )
-    channel.queue_declare("infer_queue")
+    channel.queue_declare("detect_queue")
     channel.queue_bind(
         exchange=os.environ["RABBITMQ_EXCHANGE"],
-        queue="infer_queue",
-        routing_key="infer",
+        queue="detect_queue",
+        routing_key="detect",
     )
     channel.queue_declare("ingest_queue")
     channel.queue_bind(
@@ -115,11 +115,11 @@ async def test_ingest_endpoint(rabbitmq, s3_server):
             assert data["status"] == "success"
 
         # Check that the message was sent
-        _, _, infer_body = channel.basic_get("infer_queue")
+        _, _, detect_body = channel.basic_get("detect_queue")
         _, _, ingest_body = channel.basic_get("ingest_queue")
-        assert infer_body == ingest_body, "Same message was sent to both queues"
+        assert detect_body == ingest_body, "Same message was sent to both queues"
 
-        s3_filename = infer_body.decode()
+        s3_filename = detect_body.decode()
         uuid, ext = s3_filename.split(".")
         assert ext == "mp4"
         try:
