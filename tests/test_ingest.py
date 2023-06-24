@@ -1,19 +1,14 @@
 import pytest
-from fastapi.testclient import TestClient
+from httpx import AsyncClient
 import catflow_ingest
 import aioboto3
 from uuid import UUID
 from io import BytesIO
 import os
-import json
 import aiofile
-
 
 from .mock_server import start_service
 from .mock_server import stop_process
-
-# Create a test client instance to use in the tests
-client = TestClient(catflow_ingest.main.app)
 
 os.environ["S3_ENDPOINT_URL"] = "http://localhost:5002"
 os.environ["RABBITMQ_URL"] = "amqp://guest:guest@localhost"
@@ -53,49 +48,52 @@ async def test_upload_to_s3(s3_server):
 
 
 @pytest.mark.asyncio
-async def test_check_rabbitmq_connection_fails():
-    """Test that check_rabbitmq_connection fails if it can't connect"""
-    assert await catflow_ingest.main.check_rabbitmq_connection() is False
-
-
-@pytest.mark.asyncio
-async def test_check_rabbitmq_connection(rabbitmq):
-    """Test that check_rabbitmq_connection succeeds if rabbitmq started"""
-    rmq_port = rabbitmq._impl.params.port
-    os.environ["RABBITMQ_URL"] = f"amqp://guest:guest@localhost:{rmq_port}/"
-    assert await catflow_ingest.main.check_rabbitmq_connection() is True
-
-
-@pytest.mark.asyncio
 async def test_send_to_rabbitmq(rabbitmq):
     """Test that send_to_rabbitmq sends a message to an exchange"""
+    # Mock setup
     rmq_port = rabbitmq._impl.params.port
-    os.environ["RABBITMQ_URL"] = f"amqp://guest:guest@localhost:{rmq_port}/"
-
-    # Create exchange and queue, bind
+    rabbitmq_url = f"amqp://guest:guest@localhost:{rmq_port}/"
     channel = rabbitmq.channel()
-    channel.exchange_declare(exchange="test-exchange", exchange_type="fanout")
-    result = channel.queue_declare("", exclusive=True)
-    queue_name = result.method.queue
-    channel.queue_bind(exchange="test-exchange", queue=queue_name)
+    channel.exchange_declare(exchange="test-exchange", exchange_type="direct")
+    channel.queue_declare("testkey_queue")
+    channel.queue_bind(
+        exchange="test-exchange", queue="testkey_queue", routing_key="testkey"
+    )
 
-    await catflow_ingest.main.send_to_rabbitmq("test-exchange", "test message")
-    _, _, body = channel.basic_get(queue_name)
+    # Object under test
+    producer = await catflow_ingest.Producer.create(
+        rabbitmq_url, "test-exchange", ["testkey"]
+    )
+    await producer.send_to_rabbitmq("testkey", "test message")
+    await producer.close()
+
+    # Verify
+    _, _, body = channel.basic_get("testkey_queue")
     assert body.decode() == "test message"
 
 
 @pytest.mark.asyncio
 async def test_ingest_endpoint(rabbitmq, s3_server):
-    # Set up rabbitmq
+    """Test that a video uploaded to /ingest is sent to the infer and ingest queues"""
+    # Set up mock rabbitmq
     rmq_port = rabbitmq._impl.params.port
     os.environ["RABBITMQ_URL"] = f"amqp://guest:guest@localhost:{rmq_port}/"
     channel = rabbitmq.channel()
     channel.exchange_declare(
-        exchange=os.environ["RABBITMQ_EXCHANGE"], exchange_type="fanout"
+        exchange=os.environ["RABBITMQ_EXCHANGE"], exchange_type="direct"
     )
-    result = channel.queue_declare("", exclusive=True)
-    queue_name = result.method.queue
-    channel.queue_bind(exchange=os.environ["RABBITMQ_EXCHANGE"], queue=queue_name)
+    channel.queue_declare("infer_queue")
+    channel.queue_bind(
+        exchange=os.environ["RABBITMQ_EXCHANGE"],
+        queue="infer_queue",
+        routing_key="infer",
+    )
+    channel.queue_declare("ingest_queue")
+    channel.queue_bind(
+        exchange=os.environ["RABBITMQ_EXCHANGE"],
+        queue="ingest_queue",
+        routing_key="ingest",
+    )
 
     # Set up mock S3
     session = aioboto3.Session()
@@ -105,14 +103,23 @@ async def test_ingest_endpoint(rabbitmq, s3_server):
         # Post car.mp4 to /ingest
         with open("tests/test_images/car.mp4", "rb") as video_file:
             file_data = {"file": video_file}
-            response = client.post("/ingest", files=file_data)
-            assert response.status_code == 200
-            data = json.loads(response.content)
+            async with AsyncClient(
+                app=catflow_ingest.main.app, base_url="http://test"
+            ) as client:
+                await catflow_ingest.main.app.router.startup()
+                response = await client.post("/ingest", files=file_data)
+                await catflow_ingest.main.app.router.shutdown()
+
+            assert response.status_code == 200, response.json()
+            data = response.json()
             assert data["status"] == "success"
 
         # Check that the message was sent
-        _, _, body = channel.basic_get(queue_name)
-        s3_filename = body.decode()
+        _, _, infer_body = channel.basic_get("infer_queue")
+        _, _, ingest_body = channel.basic_get("ingest_queue")
+        assert infer_body == ingest_body, "Same message was sent to both queues"
+
+        s3_filename = infer_body.decode()
         uuid, ext = s3_filename.split(".")
         assert ext == "mp4"
         try:
@@ -136,8 +143,34 @@ async def test_status_endpoint(rabbitmq):
     rmq_port = rabbitmq._impl.params.port
     os.environ["RABBITMQ_URL"] = f"amqp://guest:guest@localhost:{rmq_port}/"
 
-    response = client.get("/status")
-    assert response.status_code == 200
-    data = json.loads(response.content)
+    async with AsyncClient(
+        app=catflow_ingest.main.app, base_url="http://test"
+    ) as client:
+        await catflow_ingest.main.app.router.startup()
+        response = await client.get("/status")
+        await catflow_ingest.main.app.router.shutdown()
+
+    assert response.status_code == 200, response.json()
+    data = response.json()
     assert data["rabbitmq_status"] is True
+    assert len(data["version"].split(".")) >= 3
+
+
+@pytest.mark.asyncio
+async def test_status_endpoint_fails_correctly():
+    os.environ["RABBITMQ_URL"] = "amqp://please_fail:guest@localhost:48302/"
+
+    async with AsyncClient(
+        app=catflow_ingest.main.app, base_url="http://test"
+    ) as client:
+        try:
+            await catflow_ingest.main.app.router.startup()
+        except Exception:
+            pass  # We expect this to fail..
+        response = await client.get("/status")
+        await catflow_ingest.main.app.router.shutdown()
+
+    assert response.status_code == 500
+    data = response.json()
+    assert data["rabbitmq_status"] is False, data
     assert len(data["version"].split(".")) >= 3

@@ -1,28 +1,51 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.responses import JSONResponse
 from . import _version
+from .producer import Producer
 import aioboto3
-from aio_pika import connect_robust, Message
 import os
 from uuid import uuid4
 import logging
 
+
+async def startup_event():
+    app.state.producer = await Producer.create(
+        os.environ["RABBITMQ_URL"],
+        os.environ["RABBITMQ_EXCHANGE"],
+        [INGEST_KEY, INFER_KEY],
+    )
+
+
+async def shutdown_event():
+    await app.state.producer.close()
+
+
 logger = logging.getLogger(__name__)
 app = FastAPI()
+app.add_event_handler("startup", startup_event)
+app.add_event_handler("shutdown", shutdown_event)
+
+# Routing keys
+INGEST_KEY = "ingest"
+INFER_KEY = "infer"
 
 
 async def check_rabbitmq_connection() -> bool:
-    try:
-        connection = await connect_robust(os.environ["RABBITMQ_URL"])
-        await connection.close()
-        return True
-    except Exception:
+    if app.state.producer.connection.is_closed:
         return False
+
+    return True
 
 
 @app.get("/status")
 async def status():
     rmq_status = await check_rabbitmq_connection()
-    return {"version": _version.version, "rabbitmq_status": rmq_status}
+    status = {"version": _version.version, "rabbitmq_status": rmq_status}
+
+    if not rmq_status:
+        return JSONResponse(status, status_code=500)
+
+    return status
 
 
 async def upload_to_s3(file: bytes, filename: str):
@@ -34,21 +57,13 @@ async def upload_to_s3(file: bytes, filename: str):
         await s3.upload_fileobj(file, os.environ["AWS_BUCKETNAME"], filename)
 
 
-# TODO: connect/declare once w/ Producer class
-async def send_to_rabbitmq(exchange_name: str, message: str):
-    connection = await connect_robust(os.environ["RABBITMQ_URL"])
-    channel = await connection.channel()
-    exchange = await channel.declare_exchange(exchange_name, "fanout")
-    await exchange.publish(Message(body=message.encode("utf-8")), "")
-    await connection.close()
-
-
 @app.post("/ingest")
 async def ingest(file: UploadFile = File(...)):
     s3_path = str(uuid4()) + "." + file.filename.split(".")[-1]
     try:
         await upload_to_s3(file, s3_path)
-        await send_to_rabbitmq(os.environ["RABBITMQ_EXCHANGE"], s3_path)
+        await app.state.producer.send_to_rabbitmq(INGEST_KEY, s3_path)
+        await app.state.producer.send_to_rabbitmq(INFER_KEY, s3_path)
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
