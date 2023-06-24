@@ -44,12 +44,6 @@ jobs:
         sudo apt update && sudo apt install -y rabbitmq-server
         sudo systemctl stop rabbitmq-server
 
-    - name: Cache pip dependencies
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
-
     - name: Install dependencies
       run: |
         pip install .[dev]
