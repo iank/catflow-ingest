@@ -3,15 +3,11 @@ import aio_pika
 
 class Producer:
     @classmethod
-    async def create(cls, url, exchange_name, routing_keys):
+    async def create(cls, url, exchange_name):
         self = Producer()
         self.connection = await aio_pika.connect_robust(url)
         self.channel = await self.connection.channel()
-        self.exchange = await self.channel.declare_exchange(exchange_name, "direct")
-
-        for routing_key in routing_keys:
-            queue = await self.channel.declare_queue(f"{routing_key}_queue")
-            await queue.bind(self.exchange, routing_key=routing_key)
+        self.exchange = await self.channel.declare_exchange(exchange_name, "topic")
 
         return self
 

@@ -54,16 +54,14 @@ async def test_send_to_rabbitmq(rabbitmq):
     rmq_port = rabbitmq._impl.params.port
     rabbitmq_url = f"amqp://guest:guest@localhost:{rmq_port}/"
     channel = rabbitmq.channel()
-    channel.exchange_declare(exchange="test-exchange", exchange_type="direct")
+    channel.exchange_declare(exchange="test-exchange", exchange_type="topic")
     channel.queue_declare("testkey_queue")
     channel.queue_bind(
         exchange="test-exchange", queue="testkey_queue", routing_key="testkey"
     )
 
     # Object under test
-    producer = await catflow_ingest.Producer.create(
-        rabbitmq_url, "test-exchange", ["testkey"]
-    )
+    producer = await catflow_ingest.Producer.create(rabbitmq_url, "test-exchange")
     await producer.send_to_rabbitmq("testkey", "test message")
     await producer.close()
 
@@ -80,19 +78,13 @@ async def test_ingest_endpoint(rabbitmq, s3_server):
     os.environ["RABBITMQ_URL"] = f"amqp://guest:guest@localhost:{rmq_port}/"
     channel = rabbitmq.channel()
     channel.exchange_declare(
-        exchange=os.environ["RABBITMQ_EXCHANGE"], exchange_type="direct"
+        exchange=os.environ["RABBITMQ_EXCHANGE"], exchange_type="topic"
     )
-    channel.queue_declare("detect_queue")
+    channel.queue_declare("video_queue")
     channel.queue_bind(
         exchange=os.environ["RABBITMQ_EXCHANGE"],
-        queue="detect_queue",
-        routing_key="detect",
-    )
-    channel.queue_declare("ingest_queue")
-    channel.queue_bind(
-        exchange=os.environ["RABBITMQ_EXCHANGE"],
-        queue="ingest_queue",
-        routing_key="ingest",
+        queue="video_queue",
+        routing_key="*.video",
     )
 
     # Set up mock S3
@@ -115,11 +107,11 @@ async def test_ingest_endpoint(rabbitmq, s3_server):
             assert data["status"] == "success"
 
         # Check that the message was sent
-        _, _, detect_body = channel.basic_get("detect_queue")
-        _, _, ingest_body = channel.basic_get("ingest_queue")
-        assert detect_body == ingest_body, "Same message was sent to both queues"
+        _, _, body1 = channel.basic_get("video_queue")
+        _, _, body2 = channel.basic_get("video_queue")
+        assert body1 == body2
 
-        s3_filename = detect_body.decode()
+        s3_filename = body1.decode()
         uuid, ext = s3_filename.split(".")
         assert ext == "mp4"
         try:

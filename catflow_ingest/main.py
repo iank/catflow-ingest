@@ -12,7 +12,6 @@ async def startup_event():
     app.state.producer = await Producer.create(
         os.environ["RABBITMQ_URL"],
         os.environ["RABBITMQ_EXCHANGE"],
-        [INGEST_KEY, DETECT_KEY],
     )
 
 
@@ -26,8 +25,8 @@ app.add_event_handler("startup", startup_event)
 app.add_event_handler("shutdown", shutdown_event)
 
 # Routing keys
-INGEST_KEY = "ingest"
-DETECT_KEY = "detect"
+INGEST_KEY = "ingest.video"
+DETECT_KEY = "detect.video"
 
 
 async def check_rabbitmq_connection() -> bool:
