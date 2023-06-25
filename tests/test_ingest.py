@@ -4,6 +4,7 @@ import catflow_ingest
 import aioboto3
 from uuid import UUID
 from io import BytesIO
+import json
 import os
 import aiofile
 
@@ -111,7 +112,7 @@ async def test_ingest_endpoint(rabbitmq, s3_server):
         _, _, body2 = channel.basic_get("video_queue")
         assert body1 == body2
 
-        s3_filename = body1.decode()
+        s3_filename = json.loads(body1)[0]
         uuid, ext = s3_filename.split(".")
         assert ext == "mp4"
         try:

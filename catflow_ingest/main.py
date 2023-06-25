@@ -4,6 +4,7 @@ from . import _version
 from .producer import Producer
 import aioboto3
 import os
+import json
 from uuid import uuid4
 import logging
 
@@ -61,8 +62,8 @@ async def ingest(file: UploadFile = File(...)):
     s3_path = str(uuid4()) + "." + file.filename.split(".")[-1]
     try:
         await upload_to_s3(file, s3_path)
-        await app.state.producer.send_to_rabbitmq(INGEST_KEY, s3_path)
-        await app.state.producer.send_to_rabbitmq(DETECT_KEY, s3_path)
+        await app.state.producer.send_to_rabbitmq(INGEST_KEY, json.dumps([s3_path]))
+        await app.state.producer.send_to_rabbitmq(DETECT_KEY, json.dumps([s3_path]))
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
