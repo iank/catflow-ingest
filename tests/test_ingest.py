@@ -4,7 +4,6 @@ import catflow_ingest
 import aioboto3
 from uuid import UUID
 from io import BytesIO
-import json
 import os
 import aiofile
 from catflow_worker.types import VideoFileSchema
