@@ -15,6 +15,7 @@ dependencies = [
   "aioboto3",
   "python-multipart",
   "uvicorn",
+  "catflow-worker>=0.1.7"
 ]
 
 [tool.setuptools]

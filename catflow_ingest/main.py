@@ -2,8 +2,10 @@ from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
 from . import _version
 from .producer import Producer
+from catflow_worker.types import VideoFile, VideoFileSchema
 import aioboto3
 import os
+import json
 from uuid import uuid4
 import logging
 
@@ -61,8 +63,9 @@ async def ingest(file: UploadFile = File(...)):
     s3_path = str(uuid4()) + "." + file.filename.split(".")[-1]
     try:
         await upload_to_s3(file, s3_path)
-        await app.state.producer.send_to_rabbitmq(INGEST_KEY, s3_path)
-        await app.state.producer.send_to_rabbitmq(DETECT_KEY, s3_path)
+        video = VideoFileSchema().dump(VideoFile(key=s3_path))
+        await app.state.producer.send_to_rabbitmq(INGEST_KEY, json.dumps([video]))
+        await app.state.producer.send_to_rabbitmq(DETECT_KEY, json.dumps([video]))
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

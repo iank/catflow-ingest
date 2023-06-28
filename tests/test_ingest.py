@@ -6,6 +6,8 @@ from uuid import UUID
 from io import BytesIO
 import os
 import aiofile
+from catflow_worker.types import VideoFileSchema
+import json
 
 from .mock_server import start_service
 from .mock_server import stop_process
@@ -111,8 +113,13 @@ async def test_ingest_endpoint(rabbitmq, s3_server):
         _, _, body2 = channel.basic_get("video_queue")
         assert body1 == body2
 
-        s3_filename = body1.decode()
-        uuid, ext = s3_filename.split(".")
+        msg_obj = json.loads(body1)
+        assert len(msg_obj) == 1
+
+        schema = VideoFileSchema(many=True)
+        video = schema.load(msg_obj)[0]
+
+        uuid, ext = video.key.split(".")
         assert ext == "mp4"
         try:
             UUID(uuid)
@@ -121,7 +128,7 @@ async def test_ingest_endpoint(rabbitmq, s3_server):
 
         # Check that the file was uploaded to S3
         response = await s3.get_object(
-            Bucket=os.environ["AWS_BUCKETNAME"], Key=s3_filename
+            Bucket=os.environ["AWS_BUCKETNAME"], Key=video.key
         )
         s3_content = await response["Body"].read()
         async with aiofile.AIOFile("tests/test_images/car.mp4", "rb") as afp:
