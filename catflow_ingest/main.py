@@ -1,7 +1,7 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
 from . import _version
-from .producer import Producer
+from catflow_worker.worker import Producer
 from catflow_worker.types import VideoFile, VideoFileSchema
 import aioboto3
 import os

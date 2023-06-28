@@ -50,29 +50,6 @@ async def test_upload_to_s3(s3_server):
 
 
 @pytest.mark.asyncio
-async def test_send_to_rabbitmq(rabbitmq):
-    """Test that send_to_rabbitmq sends a message to an exchange"""
-    # Mock setup
-    rmq_port = rabbitmq._impl.params.port
-    rabbitmq_url = f"amqp://guest:guest@localhost:{rmq_port}/"
-    channel = rabbitmq.channel()
-    channel.exchange_declare(exchange="test-exchange", exchange_type="topic")
-    channel.queue_declare("testkey_queue")
-    channel.queue_bind(
-        exchange="test-exchange", queue="testkey_queue", routing_key="testkey"
-    )
-
-    # Object under test
-    producer = await catflow_ingest.Producer.create(rabbitmq_url, "test-exchange")
-    await producer.send_to_rabbitmq("testkey", "test message")
-    await producer.close()
-
-    # Verify
-    _, _, body = channel.basic_get("testkey_queue")
-    assert body.decode() == "test message"
-
-
-@pytest.mark.asyncio
 async def test_ingest_endpoint(rabbitmq, s3_server):
     """Test that a video uploaded to /ingest is sent to the detect and ingest queues"""
     # Set up mock rabbitmq
